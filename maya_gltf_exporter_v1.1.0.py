@@ -1,5 +1,5 @@
 """
-Maya GLTF/GLB Exporter v1.0
+Maya GLTF/GLB Exporter v1.1.0
 Professional GLTF 2.0 exporter for Autodesk Maya 2026+
 
 Features:
@@ -31,7 +31,7 @@ import traceback
 import math
 
 # Version information
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 VERSION_DATE = "January 2026"
 
 # ============================================================================
@@ -64,6 +64,7 @@ class GLTFExporter:
         self.node_index_map = {}  # Maya node name -> GLTF node index
         self.joint_index_map = {}  # Joint name -> GLTF node index
         self.is_glb = False
+        self.extensions_used = set()  # Track which extensions are used
         
         # Animation settings
         self.export_animation = False
@@ -161,6 +162,11 @@ class GLTFExporter:
             print(f"\n✓ Processed {processed} mesh(es)")
             
             self.gltf_data["scenes"].append(scene_data)
+            
+            # Add extensions if any were used
+            if self.extensions_used:
+                self.gltf_data["extensionsUsed"] = sorted(list(self.extensions_used))
+                print(f"\nGLTF Extensions: {', '.join(sorted(self.extensions_used))}")
             
             # Add sampler
             self.gltf_data["samplers"].append({
@@ -1145,6 +1151,86 @@ class GLTFExporter:
         except:
             pass
         
+        # Clearcoat (KHR_materials_clearcoat extension)
+        try:
+            coat_weight = cmds.getAttr(f"{mat}.coatWeight")
+            if coat_weight > 0.001:
+                clearcoat_ext = {}
+                
+                # Clearcoat intensity
+                clearcoat_ext["clearcoatFactor"] = float(coat_weight)
+                
+                # Clearcoat roughness
+                try:
+                    coat_roughness = cmds.getAttr(f"{mat}.coatRoughness")
+                    clearcoat_ext["clearcoatRoughnessFactor"] = float(coat_roughness)
+                except:
+                    pass
+                
+                # Clearcoat texture (if any)
+                coat_tex = self.get_texture(mat, "coatWeight")
+                if coat_tex is not None:
+                    clearcoat_ext["clearcoatTexture"] = {"index": coat_tex}
+                
+                # Clearcoat roughness texture
+                coat_rough_tex = self.get_texture(mat, "coatRoughness")
+                if coat_rough_tex is not None:
+                    clearcoat_ext["clearcoatRoughnessTexture"] = {"index": coat_rough_tex}
+                
+                # Clearcoat normal
+                coat_norm_tex = self.get_texture(mat, "geometryCoatNormal")
+                if coat_norm_tex is not None:
+                    clearcoat_ext["clearcoatNormalTexture"] = {"index": coat_norm_tex}
+                
+                if clearcoat_ext:
+                    if "extensions" not in pbr:
+                        pbr["extensions"] = {}
+                    pbr["extensions"]["KHR_materials_clearcoat"] = clearcoat_ext
+                    self.extensions_used.add("KHR_materials_clearcoat")
+        except:
+            pass
+        
+        # Sheen (KHR_materials_sheen extension)
+        try:
+            fuzz_weight = cmds.getAttr(f"{mat}.fuzzWeight")
+            if fuzz_weight > 0.001:
+                sheen_ext = {}
+                
+                # Sheen color (from fuzzColor)
+                try:
+                    fuzz_r = cmds.getAttr(f"{mat}.fuzzColorR")
+                    fuzz_g = cmds.getAttr(f"{mat}.fuzzColorG")
+                    fuzz_b = cmds.getAttr(f"{mat}.fuzzColorB")
+                    # Scale by weight
+                    sheen_ext["sheenColorFactor"] = [fuzz_r * fuzz_weight, fuzz_g * fuzz_weight, fuzz_b * fuzz_weight]
+                except:
+                    sheen_ext["sheenColorFactor"] = [fuzz_weight, fuzz_weight, fuzz_weight]
+                
+                # Sheen roughness (from fuzzRoughness)
+                try:
+                    fuzz_roughness = cmds.getAttr(f"{mat}.fuzzRoughness")
+                    sheen_ext["sheenRoughnessFactor"] = float(fuzz_roughness)
+                except:
+                    pass
+                
+                # Sheen color texture
+                fuzz_color_tex = self.get_texture(mat, "fuzzColor")
+                if fuzz_color_tex is not None:
+                    sheen_ext["sheenColorTexture"] = {"index": fuzz_color_tex}
+                
+                # Sheen roughness texture
+                fuzz_rough_tex = self.get_texture(mat, "fuzzRoughness")
+                if fuzz_rough_tex is not None:
+                    sheen_ext["sheenRoughnessTexture"] = {"index": fuzz_rough_tex}
+                
+                if sheen_ext:
+                    if "extensions" not in pbr:
+                        pbr["extensions"] = {}
+                    pbr["extensions"]["KHR_materials_sheen"] = sheen_ext
+                    self.extensions_used.add("KHR_materials_sheen")
+        except:
+            pass
+        
         return pbr
     
     def convert_standard(self, mat):
@@ -1214,6 +1300,70 @@ class GLTFExporter:
                     if "baseColorFactor" in pbr["pbrMetallicRoughness"]:
                         pbr["pbrMetallicRoughness"]["baseColorFactor"][3] = avg_opacity
                     pbr["alphaMode"] = "BLEND"
+        except:
+            pass
+        
+        # Clearcoat (KHR_materials_clearcoat extension)
+        try:
+            coat_weight = cmds.getAttr(f"{mat}.coat")
+            if coat_weight > 0.001:
+                clearcoat_ext = {}
+                
+                clearcoat_ext["clearcoatFactor"] = float(coat_weight)
+                
+                # Coat roughness
+                try:
+                    coat_roughness = cmds.getAttr(f"{mat}.coatRoughness")
+                    clearcoat_ext["clearcoatRoughnessFactor"] = float(coat_roughness)
+                except:
+                    pass
+                
+                # Coat color (affects the tint)
+                try:
+                    coat_color = cmds.getAttr(f"{mat}.coatColor")[0]
+                    # Note: GLTF clearcoat doesn't have a color, but we could encode it differently
+                    # For now, just noting it exists
+                except:
+                    pass
+                
+                # Coat normal
+                coat_norm_tex = self.get_texture(mat, "coatNormal")
+                if coat_norm_tex is not None:
+                    clearcoat_ext["clearcoatNormalTexture"] = {"index": coat_norm_tex}
+                
+                if clearcoat_ext:
+                    if "extensions" not in pbr:
+                        pbr["extensions"] = {}
+                    pbr["extensions"]["KHR_materials_clearcoat"] = clearcoat_ext
+                    self.extensions_used.add("KHR_materials_clearcoat")
+        except:
+            pass
+        
+        # Sheen (KHR_materials_sheen extension)
+        try:
+            sheen_weight = cmds.getAttr(f"{mat}.sheen")
+            if sheen_weight > 0.001:
+                sheen_ext = {}
+                
+                # Sheen color
+                try:
+                    sheen_color = cmds.getAttr(f"{mat}.sheenColor")[0]
+                    sheen_ext["sheenColorFactor"] = [sheen_color[0] * sheen_weight, sheen_color[1] * sheen_weight, sheen_color[2] * sheen_weight]
+                except:
+                    sheen_ext["sheenColorFactor"] = [sheen_weight, sheen_weight, sheen_weight]
+                
+                # Sheen roughness
+                try:
+                    sheen_roughness = cmds.getAttr(f"{mat}.sheenRoughness")
+                    sheen_ext["sheenRoughnessFactor"] = float(sheen_roughness)
+                except:
+                    pass
+                
+                if sheen_ext:
+                    if "extensions" not in pbr:
+                        pbr["extensions"] = {}
+                    pbr["extensions"]["KHR_materials_sheen"] = sheen_ext
+                    self.extensions_used.add("KHR_materials_sheen")
         except:
             pass
         
