@@ -287,17 +287,4 @@ For issues, questions, or contributions, please refer to the script's comments a
 
 ## Version History
 
-### v1.0.0 (January 2026)
-- Initial release
-- openPBRSurface and standardSurface support
-- Full animation export with frame baking
-- Skeletal animation (skinClusters)
-- Texture embedding
-- Correct pivot point handling
-- Timeline and custom frame range controls
-
-### v1.0.1 (January 2026)
-- Fixed texture exporting issues
-
-### v1.1.0 (January 2026)
-- Added coat and fuzz support
+- **CHANGELOG.md**(CHANGELOG.md)
