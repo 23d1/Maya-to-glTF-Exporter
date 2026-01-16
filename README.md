@@ -6,6 +6,8 @@ Professional GLTF 2.0 exporter for Autodesk Maya 2026+
 ![Maya](https://img.shields.io/badge/Maya-2026%2B-orange.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
+![screenshot](Screenshot.png)
+
 ## Features
 
 ### 🎨 Materials
