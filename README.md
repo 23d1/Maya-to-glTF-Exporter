@@ -1,4 +1,4 @@
-# Maya GLTF/GLB Exporter v1.0
+# Maya GLTF/GLB Exporter v1.0.1
 
 Professional GLTF 2.0 exporter for Autodesk Maya 2026+
 
