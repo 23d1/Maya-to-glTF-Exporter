@@ -2,6 +2,20 @@
 
 All notable changes to Maya GLTF Exporter will be documented in this file.
 
+## [1.1.1] - January 2026
+
+### Fixed
+- **GLTF Validation Errors** - Fixed EMPTY_ENTITY errors
+  - Removed empty `animations` array when no animation is exported
+  - Removed empty `skins` array when no skeletal animation is present
+  - Removed empty `extensionsUsed` array when no extensions are used
+  - Files now pass Khronos GLTF Validator without errors
+
+### Technical
+- Added `cleanup_empty_arrays()` function called before file write
+- Improved GLTF spec compliance
+- Normal maps use runtime tangent generation (standard practice, supported by all major viewers)
+
 ## [1.1.0] - January 2026
 
 ### Added

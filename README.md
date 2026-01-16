@@ -37,7 +37,7 @@ Professional GLTF 2.0 exporter for Autodesk Maya 2026+
 
 ### Quick Start
 
-1. Download `maya_gltf_exporter_v1.0.py`
+1. Download `maya_gltf_exporter_v1.1.1.py`
 2. Open Maya
 3. Open the **Script Editor** (Windows > General Editors > Script Editor)
 4. Switch to the **Python** tab

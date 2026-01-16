@@ -1,5 +1,5 @@
 """
-Maya GLTF/GLB Exporter v1.1.0
+Maya GLTF/GLB Exporter v1.1.1
 Professional GLTF 2.0 exporter for Autodesk Maya 2026+
 
 Features:
@@ -31,7 +31,7 @@ import traceback
 import math
 
 # Version information
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 VERSION_DATE = "January 2026"
 
 # ============================================================================
@@ -1121,6 +1121,8 @@ class GLTFExporter:
                 norm_tex = self.get_texture(mat, attr)
                 if norm_tex is not None:
                     pbr["normalTexture"] = {"index": norm_tex}
+                    # Note: GLTF viewers will auto-generate tangents if missing
+                    # This is standard and expected behavior
                     break
         
         # Emission
@@ -1470,8 +1472,26 @@ class GLTFExporter:
         except:
             return None
     
+    
+    def cleanup_empty_arrays(self):
+        """Remove empty arrays from GLTF data (required for validation)"""
+        # Remove empty animations array
+        if "animations" in self.gltf_data and len(self.gltf_data["animations"]) == 0:
+            del self.gltf_data["animations"]
+        
+        # Remove empty skins array
+        if "skins" in self.gltf_data and len(self.gltf_data["skins"]) == 0:
+            del self.gltf_data["skins"]
+        
+        # Remove empty extensions if no extensions were used
+        if "extensionsUsed" in self.gltf_data and len(self.gltf_data["extensionsUsed"]) == 0:
+            del self.gltf_data["extensionsUsed"]
+    
     def write_glb(self, filepath):
         """Write GLB"""
+        # Clean up empty arrays (GLTF validation requirement)
+        self.cleanup_empty_arrays()
+        
         while len(self.binary_data) % 4 != 0:
             self.binary_data.append(0)
         
@@ -1500,6 +1520,8 @@ class GLTFExporter:
     
     def write_gltf(self, filepath):
         """Write GLTF"""
+        # Clean up empty arrays (GLTF validation requirement)
+        self.cleanup_empty_arrays()
         bin_path = os.path.splitext(filepath)[0] + '.bin'
         bin_name = os.path.basename(bin_path)
         
