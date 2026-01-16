@@ -287,4 +287,4 @@ For issues, questions, or contributions, please refer to the script's comments a
 
 ## Version History
 
-- **CHANGELOG.md**(CHANGELOG.md)
+- [**CHANGELOG.md**](CHANGELOG.md)
