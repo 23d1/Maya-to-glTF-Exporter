@@ -295,3 +295,9 @@ For issues, questions, or contributions, please refer to the script's comments a
 - Texture embedding
 - Correct pivot point handling
 - Timeline and custom frame range controls
+
+### v1.0.1 (January 2026)
+- Fixed texture exporting issues
+
+### v1.1.0 (January 2026)
+- Added coat and fuzz support
