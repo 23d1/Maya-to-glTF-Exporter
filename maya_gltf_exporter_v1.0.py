@@ -10,7 +10,7 @@ Features:
 - Correct pivot point handling
 - Timeline and custom frame range control
 
-Author: Created with assistance from Claude (Anthropic)
+Author: Anders Svensson
 License: MIT
 Version: 1.0.0
 Date: January 2026
