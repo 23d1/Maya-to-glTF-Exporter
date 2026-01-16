@@ -12,7 +12,7 @@ Professional GLTF 2.0 exporter for Autodesk Maya 2026+
 
 ### 🎨 Materials
 - **openPBRSurface** - Full support for OpenPBR Surface shader
-  - Base color, metalness, roughness
+  - Base color, metalness, roughness, coat, fuzz
   - Normal maps
   - Emission
   - Opacity/transparency
