@@ -164,18 +164,6 @@ Want to reorganize your scene?
 
 ## Technical Details
 
-### World-Space Baking (v3.0.1)
-```python
-# For each frame:
-mesh_center = get_bounding_box_center(worldSpace=True)
-world_rotation = extract_rotation_from_world_matrix()
-
-# For animated meshes:
-# - Un-rotate vertices to identity
-# - Animation rotates from clean orientation
-# - Rotation axis matches Maya exactly
-```
-
 ### Coordinate System
 Maya's Y-up, right-handed system = GLTF 2.0 spec (no conversion needed)
 
