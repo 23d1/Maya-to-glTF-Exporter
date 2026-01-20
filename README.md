@@ -6,7 +6,7 @@ GLTF 2.0 exporter for Autodesk Maya 2026+ with full animation and material suppo
 [![Maya](https://img.shields.io/badge/Maya-2026%2B-orange.svg)](https://www.autodesk.com/products/maya/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-![screenshot](Screenshot.png)
+![Exporter UI](exporter-ui.png)
 
 ## Features
 
@@ -65,22 +65,15 @@ Sample Every: 1       # frames (1 = smooth, 2+ = smaller file)
 
 ## Why v3.0.1?
 
-### The Problem with Previous Versions
-Complex pivot math, hierarchy issues, rotation axis errors with parent transforms.
+**v3.0.1 is the stable release** with pure world-space baking for reliable exports.
 
-### The Solution in v3.0.1
-**Pure world-space baking** - Everything sampled directly from Maya's world space.
+See [CHANGELOG.md](CHANGELOG.md) for full version history and technical details.
 
-**For Static Meshes:**
-- Position = mesh bounding box center (world space)
-- Vertices = world-transformed and positioned
-- Works regardless of hierarchy or pivots
-
-**For Animated Meshes:**
-- Samples mesh center + rotation at every frame
-- Vertices un-rotated to identity orientation
-- Animation applies world-space rotation correctly
-- Captures actual motion exactly as Maya shows it
+**Key improvements:**
+- Works with any hierarchy depth
+- Correct animation rotation regardless of parent transforms
+- Meshes positioned exactly as they appear in Maya
+- No special scene preparation needed
 
 ## Material Support
 
