@@ -2,7 +2,7 @@
 
 GLTF 2.0 exporter for Autodesk Maya 2026+ with full animation and material support.
 
-[![Version](https://img.shields.io/badge/version-3.0.1-blue.svg)](https://github.com/yourusername/maya-gltf-exporter)
+[![Version](https://img.shields.io/badge/version-4.0.8-blue.svg)](https://github.com/yourusername/maya-gltf-exporter)
 [![Maya](https://img.shields.io/badge/Maya-2026%2B-orange.svg)](https://www.autodesk.com/products/maya/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -38,7 +38,7 @@ GLTF 2.0 exporter for Autodesk Maya 2026+ with full animation and material suppo
 
 ### Installation
 
-1. Download `maya_gltf_exporter_v3.0.1.py`
+1. Download `Maya glTF Exporter v4.0.8.py`
 2. Open Maya's **Script Editor** (Windows > General Editors > Script Editor)
 3. Switch to **Python** tab
 4. **Paste** the entire script
@@ -63,9 +63,9 @@ GLTF 2.0 exporter for Autodesk Maya 2026+ with full animation and material suppo
 Sample Every: 1       # frames (1 = smooth, 2+ = smaller file)
 ```
 
-## Why v3.0.1?
+## Why v4.0.8?
 
-**v3.0.1 is the stable release** with pure world-space baking for reliable exports.
+**v4.0.8 is the latest stable release** with improved hierarchy support and local pivot compensation.
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history and technical details.
 
@@ -74,6 +74,7 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history and technical details.
 - Correct animation rotation regardless of parent transforms
 - Meshes positioned exactly as they appear in Maya
 - No special scene preparation needed
+- **Accurate local pivot handling** - Preserves relative positions in complex hierarchies
 
 ## Material Support
 
@@ -203,7 +204,7 @@ Maya's Y-up, right-handed system = GLTF 2.0 spec (no conversion needed)
 
 **Created with assistance from:** Claude (Anthropic AI)  
 **License:** MIT  
-**Version:** 3.0.1  
+**Version:** 4.0.8  
 **Date:** January 2026
 
 ## Support

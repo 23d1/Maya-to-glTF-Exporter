@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.0.8] - January 2026
+
+### Fixed
+- **Local pivot handling** - Correctly compensates for parent and self pivots in hierarchies
+- Fixed issue where local pivots shifted to parent object's pivot upon export
+- Updated translation calculation: `glTF Translation = Maya Local Translation - Parent Pivot + Self Pivot`
+- Applied pivot compensation to both static meshes and animated transforms (frame baking)
+
+---
+
 ## [3.0.1] - January 2026 ⭐ STABLE RELEASE
 
 ### Fixed
