@@ -1,5 +1,5 @@
 """
-Maya GLTF/GLB Exporter v1.1.1
+Maya GLTF/GLB Exporter v1.0
 Professional GLTF 2.0 exporter for Autodesk Maya 2026+
 
 Features:
@@ -31,7 +31,7 @@ import traceback
 import math
 
 # Version information
-VERSION = "1.1.1"
+VERSION = "3.0.1"
 VERSION_DATE = "January 2026"
 
 # ============================================================================
@@ -115,8 +115,9 @@ class GLTFExporter:
         # Get objects
         if selection_only:
             objects = cmds.ls(selection=True, dag=True, shapes=True, type='mesh')
-            # Also get transforms for animation (with LONG names to match node_index_map)
-            self.export_transforms = cmds.ls(selection=True, transforms=True, long=True)
+            # Get transforms for animation (with LONG names to match node_index_map)
+            # Use dag=True to get children of selected parents
+            self.export_transforms = cmds.ls(selection=True, dag=True, transforms=True, long=True)
         else:
             objects = cmds.ls(dag=True, shapes=True, type='mesh')
             self.export_transforms = cmds.ls(dag=True, transforms=True, long=True)
@@ -262,13 +263,70 @@ class GLTFExporter:
         # Check for skinning
         skin_cluster = self.get_skin_cluster(mesh_shape)
         
-        # Get rotate pivot to offset mesh vertices
-        rotate_pivot = cmds.xform(transform, query=True, rotatePivot=True, worldSpace=False)
-        pivot_at_origin = all(abs(p) < 0.0001 for p in rotate_pivot)
+        # Get world matrix and mesh bounding box
+        world_matrix_list = cmds.xform(transform, query=True, matrix=True, worldSpace=True)
+        bbox = cmds.xform(transform, query=True, boundingBox=True, worldSpace=True)
+        mesh_center_world = [
+            (bbox[0] + bbox[3]) / 2,
+            (bbox[1] + bbox[4]) / 2,
+            (bbox[2] + bbox[5]) / 2
+        ]
         
-        if not pivot_at_origin:
-            print(f"  ℹ Pivot (local): [{rotate_pivot[0]:.4f}, {rotate_pivot[1]:.4f}, {rotate_pivot[2]:.4f}]")
-            print(f"  ℹ Offsetting vertices by -pivot for correct rotation")
+        print(f"  ℹ Mesh center (world): [{mesh_center_world[0]:.4f}, {mesh_center_world[1]:.4f}, {mesh_center_world[2]:.4f}]")
+        
+        # Check if animated
+        will_animate = False
+        if self.export_animation:
+            will_animate = self.is_animated(transform)
+        
+        # Determine node position
+        if will_animate:
+            # ANIMATED: Node at mesh center (animation will move it)
+            node_world_pos = mesh_center_world
+            print(f"  ℹ Animated - vertices will be un-rotated to identity")
+            
+            # For animation: we need to un-rotate vertices to identity orientation
+            # So animation can apply world-space rotation from identity
+            # Get initial world rotation and invert it
+            import maya.api.OpenMaya as om2
+            matrix_obj = om2.MMatrix([
+                world_matrix_list[0], world_matrix_list[1], world_matrix_list[2], world_matrix_list[3],
+                world_matrix_list[4], world_matrix_list[5], world_matrix_list[6], world_matrix_list[7],
+                world_matrix_list[8], world_matrix_list[9], world_matrix_list[10], world_matrix_list[11],
+                world_matrix_list[12], world_matrix_list[13], world_matrix_list[14], world_matrix_list[15]
+            ])
+            
+            transform_matrix = om2.MTransformationMatrix(matrix_obj)
+            
+            # Get rotation and invert it
+            rotation_quat = transform_matrix.rotation(asQuaternion=True)
+            inverse_quat = rotation_quat.inverse()
+            
+            # Create inverse rotation matrix (rotation only, no translation)
+            inverse_rotation_matrix = om2.MTransformationMatrix()
+            inverse_rotation_matrix.setRotation(inverse_quat)
+            inverse_matrix = inverse_rotation_matrix.asMatrix()
+            
+            # We'll apply this inverse rotation to vertices
+            unrotate_vertices = True
+            
+        else:
+            # STATIC: Node at mesh center
+            node_world_pos = mesh_center_world
+            print(f"  ℹ Static - node at mesh center")
+            unrotate_vertices = False
+        
+        # Convert matrix to MMatrix for vertex transformation
+        matrix = om.MMatrix()
+        om.MScriptUtil.createMatrixFromList(world_matrix_list, matrix)
+        
+        # Store for get_transform_with_pivot
+        if not hasattr(self, '_mesh_node_positions'):
+            self._mesh_node_positions = {}
+        self._mesh_node_positions[transform] = {
+            'position': node_world_pos,
+            'animated': will_animate
+        }
         
         # Build vertex data
         vertices = []
@@ -322,11 +380,26 @@ class GLTFExporter:
                         
                         point = points[vert_index]
                         
-                        # Apply pivot offset to vertices
-                        # Subtract pivot so mesh rotates around correct point in GLTF
-                        vertex_x = point.x - rotate_pivot[0]
-                        vertex_y = point.y - rotate_pivot[1]
-                        vertex_z = point.z - rotate_pivot[2]
+                        # Transform vertex to world space
+                        point_world = om.MPoint(point.x, point.y, point.z) * matrix
+                        
+                        # For animated meshes: un-rotate to identity orientation
+                        if unrotate_vertices:
+                            # Apply inverse rotation (as om2.MPoint for the transformation)
+                            import maya.api.OpenMaya as om2
+                            point_om2 = om2.MPoint(point_world.x - node_world_pos[0], 
+                                                   point_world.y - node_world_pos[1], 
+                                                   point_world.z - node_world_pos[2])
+                            point_unrotated = point_om2 * inverse_matrix
+                            
+                            vertex_x = point_unrotated.x
+                            vertex_y = point_unrotated.y
+                            vertex_z = point_unrotated.z
+                        else:
+                            # Static: just offset by node position
+                            vertex_x = point_world.x - node_world_pos[0]
+                            vertex_y = point_world.y - node_world_pos[1]
+                            vertex_z = point_world.z - node_world_pos[2]
                         
                         vertices.extend([vertex_x, vertex_y, vertex_z])
                         vertex_normals.extend([normal.x, normal.y, normal.z])
@@ -524,31 +597,22 @@ class GLTFExporter:
         }
         
         # Get transform with pivot baked in
-        translation, rotation, scale, pivot = self.get_transform_with_pivot(transform)
+        translation, rotation, scale = self.get_transform_with_pivot(transform)
+        
+        # Check if this will be animated
+        is_animated = False
+        if hasattr(self, '_mesh_node_positions') and transform in self._mesh_node_positions:
+            is_animated = self._mesh_node_positions[transform]['animated']
         
         # Debug output
-        print(f"  ℹ World translation from matrix: [{translation[0]:.6f}, {translation[1]:.6f}, {translation[2]:.6f}]")
+        print(f"  ℹ Node position: [{translation[0]:.6f}, {translation[1]:.6f}, {translation[2]:.6f}]")
         
-        # Log if pivot is offset
-        pivot_at_origin = all(abs(p) < 0.0001 for p in pivot)
-        if not pivot_at_origin:
-            print(f"  ℹ Local pivot: [{pivot[0]:.6f}, {pivot[1]:.6f}, {pivot[2]:.6f}]")
-            print(f"  ℹ Mesh vertices will be offset by: [{-pivot[0]:.6f}, {-pivot[1]:.6f}, {-pivot[2]:.6f}]")
-        
-        # Check for identity transforms
-        is_identity_trans = all(abs(t) < 0.0001 for t in translation)
-        is_identity_rot = all(abs(r) < 0.0001 for r in rotation)
-        is_identity_scale = all(abs(s - 1.0) < 0.0001 for s in scale)
-        
-        if not is_identity_trans:
+        # Set translation (always needed)
+        if not all(abs(t) < 0.0001 for t in translation):
             node_data["translation"] = translation
         
-        if not is_identity_rot:
-            quat = self.euler_to_quaternion(rotation[0], rotation[1], rotation[2])
-            node_data["rotation"] = quat
-        
-        if not is_identity_scale:
-            node_data["scale"] = scale
+        # NO static rotation - vertices are in world space with rotation baked in
+        # For animated nodes, rotation starts at identity and animation changes it
         
         # Add skin reference if skinned
         if skin_cluster:
@@ -799,11 +863,10 @@ class GLTFExporter:
             
             node_idx = self.node_index_map[transform]
             
-            # Get the INITIAL transform (constant throughout animation)
-            # We only want rotation to change, not position
-            initial_trans, initial_rot, initial_scale, pivot = self.get_transform_with_pivot(transform)
+            print(f"\n  Baking {transform.split('|')[-1]}...")
             
-            # Bake translation, rotation, scale
+            # For animation: Sample world-space position AND rotation at every frame
+            # This captures the actual motion as it appears in Maya
             translations = []
             rotations = []
             scales = []
@@ -811,19 +874,37 @@ class GLTFExporter:
             for frame in frames:
                 cmds.currentTime(frame)
                 
-                # Translation stays CONSTANT (we calculated it above)
-                # Only rotation changes
-                translations.extend(initial_trans)
+                # Get mesh bounding box at this frame (where it actually is)
+                bbox = cmds.xform(transform, query=True, boundingBox=True, worldSpace=True)
+                mesh_center = [
+                    (bbox[0] + bbox[3]) / 2,
+                    (bbox[1] + bbox[4]) / 2,
+                    (bbox[2] + bbox[5]) / 2
+                ]
+                translations.extend(mesh_center)
                 
-                # Get current rotation
-                rot = cmds.xform(transform, query=True, rotation=True, worldSpace=False)
-                quat = self.euler_to_quaternion(rot[0], rot[1], rot[2])
+                # Get world-space rotation at this frame
+                world_matrix = cmds.xform(transform, query=True, matrix=True, worldSpace=True)
+                
+                import maya.api.OpenMaya as om2
+                matrix_obj = om2.MMatrix([
+                    world_matrix[0], world_matrix[1], world_matrix[2], world_matrix[3],
+                    world_matrix[4], world_matrix[5], world_matrix[6], world_matrix[7],
+                    world_matrix[8], world_matrix[9], world_matrix[10], world_matrix[11],
+                    world_matrix[12], world_matrix[13], world_matrix[14], world_matrix[15]
+                ])
+                
+                transform_matrix = om2.MTransformationMatrix(matrix_obj)
+                rotation_quat = transform_matrix.rotation(asQuaternion=True)
+                
+                quat = [rotation_quat.x, rotation_quat.y, rotation_quat.z, rotation_quat.w]
                 rotations.extend(quat)
                 
-                # Scale (usually constant but we'll bake it anyway)
-                # Use relative=True to avoid warnings (it's the local scale we want anyway)
+                # Scale (usually constant)
                 scl = cmds.xform(transform, query=True, scale=True, relative=True)
                 scales.extend(scl)
+            
+            print(f"    Sampled {len(frames)} frames")
             
             # Pack and add translation
             if len(translations) > 0:
@@ -944,35 +1025,21 @@ class GLTFExporter:
             print("  No animation channels exported")
     
     def get_transform_with_pivot(self, transform):
-        """Get translation/rotation/scale with pivot handling
+        """Get translation/rotation/scale using pre-calculated world positions"""
+        # Use stored position from process_mesh
+        if hasattr(self, '_mesh_node_positions') and transform in self._mesh_node_positions:
+            node_info = self._mesh_node_positions[transform]
+            final_translation = node_info['position']
+        else:
+            # Fallback: calculate on the fly
+            world_matrix = cmds.xform(transform, query=True, matrix=True, worldSpace=True)
+            final_translation = [world_matrix[12], world_matrix[13], world_matrix[14]]
         
-        For GLTF export:
-        - Node is positioned at world_position + local_pivot
-        - Mesh vertices are offset by -local_pivot (done in process_mesh)
-        - This makes rotation around node origin = rotation around Maya pivot
-        """
-        # Get world matrix to get accurate world position
-        world_matrix = cmds.xform(transform, query=True, matrix=True, worldSpace=True)
-        
-        # Extract world translation from matrix (last row)
-        world_translation = [world_matrix[12], world_matrix[13], world_matrix[14]]
-        
-        # Get rotation and scale in local space
+        # Get rotation and scale (not used for static, used for initial state of animated)
         rotation = cmds.xform(transform, query=True, rotation=True, worldSpace=False)
-        scale = cmds.xform(transform, query=True, scale=True, relative=True)  # relative=True to avoid warnings
+        scale = cmds.xform(transform, query=True, scale=True, relative=True)
         
-        # Get local pivot
-        local_pivot = cmds.xform(transform, query=True, rotatePivot=True, worldSpace=False)
-        
-        # Add local pivot to world position
-        # This compensates for the vertex offset done in process_mesh
-        final_translation = [
-            world_translation[0] + local_pivot[0],
-            world_translation[1] + local_pivot[1],
-            world_translation[2] + local_pivot[2]
-        ]
-        
-        return final_translation, rotation, scale, local_pivot
+        return final_translation, rotation, scale
     
     def is_animated(self, transform):
         """Check if transform is animated"""

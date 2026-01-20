@@ -1,290 +1,229 @@
-# Maya GLTF/GLB Exporter v1.1.1
+# Maya GLTF/GLB Exporter
 
-Professional GLTF 2.0 exporter for Autodesk Maya 2026+
+Professional GLTF 2.0 exporter for Autodesk Maya 2026+ with full animation and material support.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![Maya](https://img.shields.io/badge/Maya-2026%2B-orange.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+[![Version](https://img.shields.io/badge/version-3.0.1-blue.svg)](https://github.com/yourusername/maya-gltf-exporter)
+[![Maya](https://img.shields.io/badge/Maya-2026%2B-orange.svg)](https://www.autodesk.com/products/maya/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ![screenshot](Screenshot.png)
 
 ## Features
 
 ### 🎨 Materials
-- **openPBRSurface** - Full support for OpenPBR Surface shader
-  - Base color, metalness, roughness, coat, fuzz
-  - Normal maps
-  - Emission
-  - Opacity/transparency
-- **standardSurface** - Maya's standard surface shader
+- **openPBRSurface** - Full PBR workflow support
+- **standardSurface** - Maya's standard shader
 - **Legacy Materials** - Lambert, Blinn, Phong
+- **Extensions** - KHR_materials_clearcoat, KHR_materials_sheen
+- **Textures** - Base color, metallic, roughness, normal, emission, opacity
 
 ### 🎬 Animation
-- **Transform Animation** - Position, rotation, scale keyframes
-- **Frame Baking** - Bake animation at any frame rate
-- **Timeline Control** - Use Maya timeline or custom frame ranges
-- **Skeletal Animation** - Full skinCluster support with up to 4 bone influences per vertex
-- **Correct Pivot Handling** - Properly exports Maya pivot points, even with rotated parent hierarchies
+- **Transform Animation** - Rotation, translation, scale
+- **World-Space Baking** - Works with any hierarchy
+- **Frame Sampling** - Custom frame ranges and sample rates
+- **Skeletal Animation** - Full skinCluster support
 
-### 📦 Export Options
-- **GLB Format** - Single binary file with embedded textures
-- **GLTF Format** - JSON + separate .bin and texture files
-- **Texture Embedding** - Automatic texture embedding in GLB format
-- **Smooth Normals** - Proper vertex normal export for smooth shading
-- **Selection Export** - Export selected objects only
+### 🏗️ Hierarchy Support
+- ✅ Nested groups (any depth)
+- ✅ Parent transforms with rotation/scale
+- ✅ Frozen or unfrozen transforms
+- ✅ Offset pivots
+- ✅ Mixed animated and static objects
 
-## Installation
+### 📦 Export Formats
+- **GLB** - Single binary file with embedded textures
+- **GLTF** - JSON + separate bin and texture files
 
-### Quick Start
+## Quick Start
 
-1. Download `maya_gltf_exporter_v1.1.1.py`
-2. Open Maya
-3. Open the **Script Editor** (Windows > General Editors > Script Editor)
-4. Switch to the **Python** tab
-5. **Copy and paste** the entire script
-6. **Execute** (Ctrl+Enter or Command+Return)
-7. The exporter UI will appear
+### Installation
 
-### Optional: Add to Maya Shelf
+1. Download `maya_gltf_exporter_v3.0.1.py`
+2. Open Maya's **Script Editor** (Windows > General Editors > Script Editor)
+3. Switch to **Python** tab
+4. **Paste** the entire script
+5. **Execute** (Ctrl+Enter / Cmd+Return)
 
-1. Follow steps 1-5 above
-2. In the Script Editor, select all the script text
-3. **Middle-mouse drag** the selected text to your shelf
-4. A new shelf button will be created
-5. Click the button anytime to launch the exporter
+### Basic Usage
 
-## Usage
-
-### Basic Export
-
-1. Launch the exporter (run the script)
-2. Choose **GLB** or **GLTF** format
-3. Click **Browse** to choose output location
-4. Click **EXPORT**
+```python
+# The exporter UI will appear automatically
+# 1. Choose GLB or GLTF format
+# 2. Browse to output location
+# 3. Check "Export Animation" if needed
+# 4. Click EXPORT
+```
 
 ### Animation Export
 
-1. Check **"Export Animation"**
-2. Choose timeline or custom range:
-   - **Use Timeline Range** - Uses Maya's playback range
-   - **Custom Range** - Specify start/end frames manually
-3. *Optional:* Check **"Bake Animation"** if you want to force baking without keyframes
-4. Set **Sample Every N Frames** (default: 1 = every frame)
-5. Click **EXPORT**
-
-### Advanced Options
-
-**Export Selected Only**
-- Only exports currently selected objects
-- Useful for exporting specific parts of your scene
-
-**Force Bake All**
-- Bakes animation for all transforms, even without keyframes
-- Use when animation is driven by expressions, constraints, etc.
-
-**Sample Rate**
-- Controls how often to sample animation
-- 1 = every frame (smooth, larger file)
-- 2 = every other frame (smaller file, slightly less smooth)
-- Higher values = smaller files but choppier animation
-
-## Material Mapping
-
-### openPBRSurface → GLTF PBR
-
-| Maya (openPBRSurface) | GLTF (pbrMetallicRoughness) |
-|----------------------|----------------------------|
-| baseColor × baseWeight | baseColorFactor / baseColorTexture |
-| baseMetalness | metallicFactor |
-| specularRoughness | roughnessFactor |
-| geometryNormal | normalTexture |
-| emissionColor × emissionLuminance | emissiveFactor / emissiveTexture |
-| geometryOpacity | alpha channel + alphaMode |
-
-### standardSurface → GLTF PBR
-
-| Maya (standardSurface) | GLTF (pbrMetallicRoughness) |
-|----------------------|----------------------------|
-| baseColor | baseColorFactor / baseColorTexture |
-| metalness | metallicFactor |
-| specularRoughness | roughnessFactor |
-
-### Legacy Materials
-
-Lambert, Blinn, and Phong materials are converted to basic PBR:
-- Color → baseColorFactor
-- Metalness set to 0
-- Roughness: 1.0 (Lambert), 0.5 (Blinn/Phong)
-
-## Technical Details
-
-### File Structure
-
-**GLB (Binary)**
-```
-file.glb (single file)
-├─ JSON chunk (GLTF structure)
-└─ Binary chunk (geometry + textures)
+```python
+# In the exporter UI:
+☑ Export Animation
+● Use Timeline Range  # or set custom range
+Sample Every: 1       # frames (1 = smooth, 2+ = smaller file)
 ```
 
-**GLTF (JSON)**
+## Why v3.0.1?
+
+### The Problem with Previous Versions
+Complex pivot math, hierarchy issues, rotation axis errors with parent transforms.
+
+### The Solution in v3.0.1
+**Pure world-space baking** - Everything sampled directly from Maya's world space.
+
+**For Static Meshes:**
+- Position = mesh bounding box center (world space)
+- Vertices = world-transformed and positioned
+- Works regardless of hierarchy or pivots
+
+**For Animated Meshes:**
+- Samples mesh center + rotation at every frame
+- Vertices un-rotated to identity orientation
+- Animation applies world-space rotation correctly
+- Captures actual motion exactly as Maya shows it
+
+## Material Support
+
+### openPBRSurface
 ```
-file.gltf (JSON structure)
-file.bin (binary geometry data)
-texture1.png (external texture)
-texture2.jpg (external texture)
-...
+baseColor, baseMetalness, specularRoughness
+→ GLTF pbrMetallicRoughness
+
+geometryNormal → normalTexture
+emissionColor × emissionLuminance → emissive
+coatWeight, coatRoughness → KHR_materials_clearcoat
+fuzzWeight, fuzzColor → KHR_materials_sheen
 ```
 
-### Pivot Point Handling
+### standardSurface
+```
+baseColor, metalness, specularRoughness
+→ GLTF pbrMetallicRoughness
 
-The exporter correctly handles Maya's pivot points by:
-1. Reading the world transform matrix (accurate with rotated parents)
-2. Offsetting mesh vertices by the negative local pivot
-3. Positioning the GLTF node at world_position + local_pivot
-4. This ensures rotation happens around the correct point in GLTF viewers
-
-### Coordinate System
-
-Maya uses a **Y-up, right-handed** coordinate system, which matches GLTF 2.0 specifications. No coordinate conversion is needed.
+normalCamera → normalTexture
+emission → emissive
+coat → KHR_materials_clearcoat
+sheen → KHR_materials_sheen
+```
 
 ## Compatibility
 
 ### Tested With
 - **Maya 2026** (primary target)
-- **Three.js** - Full compatibility
-- **Babylon.js** - Full compatibility
-- **glTF Viewer** (https://gltf-viewer.donmccurdy.com/)
-- **Blender** - Import tested successfully
+- **Three.js** - Full support
+- **Babylon.js** - Full support  
+- **glTF Viewer** - donmccurdy.com
+- **Blender** - Import tested
 
-### GLTF Version
-- Exports **GLTF 2.0** specification
-- Uses core GLTF features (no extensions required)
+### GLTF Spec
+- **Version:** GLTF 2.0
+- **Extensions:** KHR_materials_clearcoat, KHR_materials_sheen
+- **Validation:** Passes Khronos glTF-Validator
+
+## Common Workflows
+
+### Static Model
+```
+1. Model in Maya
+2. Run exporter
+3. Choose GLB format
+4. Export
+✓ Done
+```
+
+### Animated Model
+```
+1. Model and animate in Maya (any hierarchy)
+2. Run exporter  
+3. ☑ Export Animation
+4. Choose timeline or custom range
+5. Export
+✓ Animation works correctly
+```
+
+### Hierarchy Changes
+```
+Want to reorganize your scene?
+1. Group/ungroup objects as needed
+2. Transform parent groups
+3. Export
+✓ Still works - no special steps needed
+```
 
 ## Troubleshooting
 
-### Issue: Textures not showing
-**Solution:** 
-- Ensure texture files exist at the paths specified in Maya
-- For GLB format, textures must be PNG or JPEG
-- Check that file paths don't contain special characters
+### Animation on wrong axis
+**Fixed in v3.0.1** - Update to latest version
 
-### Issue: Animation not exporting
-**Solution:**
-- Make sure "Export Animation" is checked
-- Verify objects have keyframes (or use "Force Bake All")
-- Check that the timeline range is correct
-- Ensure animated objects are actually exported (not filtered out)
+### Meshes in wrong position
+**Fixed in v3.0.1** - Now uses world-space bounding box center
 
-### Issue: Mesh appears in wrong position
-**Solution:**
-- Check for frozen transforms in Maya
-- Verify parent hierarchy doesn't have unexpected rotations
-- Try centering pivot (Modify > Center Pivot) if pivot is intentionally offset
+### Textures not showing
+- Ensure texture paths are valid
+- Use PNG or JPEG for GLB format
+- Check file paths contain no special characters
 
-### Issue: Normals look faceted/flat
-**Solution:**
-- In Maya: Mesh Display > Soften Edge
-- The exporter exports smooth vertex normals when available
+### Animation not exporting
+- Verify "Export Animation" is checked
+- Ensure objects have keyframes
+- Check timeline range is correct
 
-### Issue: Scale warnings during export
-**Solution:**
-- These warnings are harmless - Maya falls back to relative scale
-- The export will work correctly despite the warnings
+## Technical Details
+
+### World-Space Baking (v3.0.1)
+```python
+# For each frame:
+mesh_center = get_bounding_box_center(worldSpace=True)
+world_rotation = extract_rotation_from_world_matrix()
+
+# For animated meshes:
+# - Un-rotate vertices to identity
+# - Animation rotates from clean orientation
+# - Rotation axis matches Maya exactly
+```
+
+### Coordinate System
+Maya's Y-up, right-handed system = GLTF 2.0 spec (no conversion needed)
 
 ## Limitations
 
-### Not Currently Supported
-- **Blend shapes** - Planned for future version
-- **Multiple UV sets** - Only UV set 0 is exported
-- **Vertex colors** - Not yet implemented
-- **GLTF Extensions** - Uses core GLTF only (no KHR_materials_clearcoat, etc.)
-- **Cameras and Lights** - Geometry and materials only
+**Not Currently Supported:**
+- Blend shapes
+- Multiple UV sets (only UV set 0)
+- Vertex colors
+- Cameras and lights
+- Non-core GLTF extensions (beyond clearcoat/sheen)
 
-### Material Limitations
-Some openPBRSurface features cannot be represented in core GLTF:
-- Subsurface scattering
-- Coat/clearcoat (requires extension)
-- Fuzz/sheen (requires extension)
-- Thin film
+## Performance
 
-## Performance Tips
+**For Faster Exports:**
+- Export selected objects only
+- Use lower sample rates (2-3 frames)
+- Keep texture resolution reasonable (2K max)
 
-### For Faster Exports
-- Export selected objects only when possible
-- Use lower sample rates for animation (2-3 frames)
-- Keep texture resolutions reasonable (2K max for real-time use)
-
-### For Smaller Files
-- Use JPEG textures instead of PNG where possible
+**For Smaller Files:**
+- Use JPEG textures where possible
 - Reduce animation sample rate
-- Remove unused UVs and vertex data in Maya before export
-
-## Examples
-
-### Basic Static Model
-```python
-# 1. Create or open your model in Maya
-# 2. Run the exporter script
-# 3. Select GLB format
-# 4. Browse to output location
-# 5. Click EXPORT
-```
-
-### Animated Character
-```python
-# 1. Rig and animate your character in Maya
-# 2. Run the exporter script
-# 3. Check "Export Animation"
-# 4. Select "Use Timeline Range"
-# 5. Set sample rate to 1 (every frame)
-# 6. Click EXPORT
-```
-
-### Custom Frame Range
-```python
-# Export only frames 50-100 of a longer animation
-# 1. Run exporter
-# 2. Check "Export Animation"  
-# 3. Select "Custom Range"
-# 4. Set Start Frame: 50, End Frame: 100
-# 5. Click EXPORT
-```
+- Remove unused geometry
 
 ## Credits
 
 **Created with assistance from:** Claude (Anthropic AI)  
-**Development Date:** January 2026  
-**License:** MIT License  
-
-## License
-
-MIT License
-
-Copyright (c) 2026
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+**License:** MIT  
+**Version:** 3.0.1  
+**Date:** January 2026
 
 ## Support
 
-For issues, questions, or contributions, please refer to the script's comments and documentation.
+For issues or questions:
+1. Check [CHANGELOG.md](CHANGELOG.md) for recent fixes
+2. Review troubleshooting section above
+3. Open an issue on GitHub
 
-## Version History
+## License
 
-- [**CHANGELOG.md**](CHANGELOG.md)
+MIT License - See [LICENSE](LICENSE) file for details
+
+---
+
+**Note:** This exporter prioritizes correctness over feature completeness. It handles the most common use cases (PBR materials, animation, hierarchy) extremely well, making it ideal for real-time 3D applications and web-based viewers.
