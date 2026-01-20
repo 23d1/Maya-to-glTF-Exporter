@@ -1,6 +1,6 @@
 # Maya GLTF/GLB Exporter
 
-Professional GLTF 2.0 exporter for Autodesk Maya 2026+ with full animation and material support.
+GLTF 2.0 exporter for Autodesk Maya 2026+ with full animation and material support.
 
 [![Version](https://img.shields.io/badge/version-3.0.1-blue.svg)](https://github.com/yourusername/maya-gltf-exporter)
 [![Maya](https://img.shields.io/badge/Maya-2026%2B-orange.svg)](https://www.autodesk.com/products/maya/)
