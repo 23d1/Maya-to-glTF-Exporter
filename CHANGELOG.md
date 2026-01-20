@@ -10,7 +10,7 @@
 
 ---
 
-## [3.0.1] - January 2026 ⭐ STABLE RELEASE
+## [3.0.1] - January 2026
 
 ### Fixed
 - **Animation rotation axis corrected** - Animated meshes now rotate on correct axis regardless of parent transforms
