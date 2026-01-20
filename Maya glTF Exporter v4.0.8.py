@@ -1,5 +1,5 @@
 """
-Maya GLTF/GLB Exporter v3.0.1
+Maya GLTF/GLB Exporter v4.0.8
 GLTF 2.0 exporter for Autodesk Maya 2026+
 
 Features:
@@ -7,12 +7,15 @@ Features:
 - Full animation export with frame baking
 - Skeletal animation support (skinClusters)
 - Texture embedding in GLB format
-- World-space baking for any hierarchy
+- Proper hierarchy support with parent/child relationships
 - Timeline and custom frame range control
+- Fixed axis and pivot point handling
+- Accurate quaternion rotation export using Maya API
+- Correct transform inheritance for animated meshes
 
 Author: Created with assistance from Claude (Anthropic)
 License: MIT
-Version: 3.0.1
+Version: 4.0.3
 Date: January 2026
 
 USAGE:
@@ -20,8 +23,7 @@ USAGE:
 2. Paste into Maya Script Editor (Python tab)
 3. Execute to open the exporter UI
 """
-3. Execute to open the exporter UI
-"""
+
 
 import maya.cmds as cmds
 import maya.OpenMaya as om
@@ -33,7 +35,7 @@ import traceback
 import math
 
 # Version information
-VERSION = "3.0.1"
+VERSION = "4.0.8"
 VERSION_DATE = "January 2026"
 
 # ============================================================================
@@ -65,6 +67,7 @@ class GLTFExporter:
         self.texture_index_map = {}
         self.node_index_map = {}  # Maya node name -> GLTF node index
         self.joint_index_map = {}  # Joint name -> GLTF node index
+        self.pivot_map = {}  # Maya node name -> rotatePivot [x, y, z]
         self.is_glb = False
         self.extensions_used = set()  # Track which extensions are used
         
@@ -94,6 +97,7 @@ class GLTFExporter:
         self.force_bake_all = force_bake_all
         self.use_timeline = use_timeline
         self.sample_rate = sample_rate
+        self.pivot_map = {}
         
         # Get animation range
         if export_anim:
@@ -142,27 +146,36 @@ class GLTFExporter:
             scene_data = {"name": "Scene", "nodes": []}
             
             # Process meshes and collect all node indices
-            processed = 0
-            all_node_indices = []
+            # Build hierarchy properly - preserve parent/child relationships
+            root_nodes = self.build_hierarchy(objects)
             
+            processed = 0
+            
+            # Process all meshes first (creates nodes)
             for mesh_shape in objects:
                 try:
                     print(f"\n{mesh_shape}")
                     node_idx = self.process_mesh(mesh_shape)
                     if node_idx is not None:
-                        all_node_indices.append(node_idx)
                         processed += 1
                 except Exception as e:
                     print(f"  ERROR: {e}")
                     traceback.print_exc()
             
-            # Add ALL nodes to scene (simplified approach - works for most cases)
-            scene_data["nodes"] = all_node_indices
+            # Process parent transforms (empty nodes)
+            self.process_parent_transforms(objects)
+            
+            # Build parent-child relationships in GLTF
+            self.build_gltf_hierarchy()
+            
+            # Add only ROOT nodes to scene (children are referenced by parents)
+            scene_data["nodes"] = [self.node_index_map[node] for node in root_nodes if node in self.node_index_map]
             
             if processed == 0:
                 return False
             
             print(f"\n✓ Processed {processed} mesh(es)")
+            print(f"✓ Scene hierarchy: {len(scene_data['nodes'])} root node(s)")
             
             self.gltf_data["scenes"].append(scene_data)
             
@@ -206,34 +219,119 @@ class GLTFExporter:
             cmds.currentTime(current_time)
     
     def build_hierarchy(self, mesh_shapes):
-        """Build node hierarchy and detect joints"""
-        print("\nBuilding node hierarchy...")
+        """Build proper node hierarchy preserving parent/child relationships"""
+        print("\nBuilding hierarchy...")
         
-        # Get all transforms
-        all_transforms = set()
+        # Get all transforms that need to be exported
+        transforms_to_export = set()
+        
+        # Add all mesh transforms
         for mesh_shape in mesh_shapes:
             transform = cmds.listRelatives(mesh_shape, parent=True, fullPath=True)
             if transform:
-                all_transforms.add(transform[0])
-                # Add all parents up to root
-                parent = cmds.listRelatives(transform[0], parent=True, fullPath=True)
-                while parent:
-                    all_transforms.add(parent[0])
-                    parent = cmds.listRelatives(parent[0], parent=True, fullPath=True)
+                transforms_to_export.add(transform[0])
         
-        # Find root nodes (nodes with no parent or parent not in our set)
-        root_nodes = []
-        for transform in all_transforms:
+        # Add all parent transforms up to root
+        for transform in list(transforms_to_export):
             parent = cmds.listRelatives(transform, parent=True, fullPath=True)
-            if not parent or parent[0] not in all_transforms:
+            while parent:
+                transforms_to_export.add(parent[0])
+                parent = cmds.listRelatives(parent[0], parent=True, fullPath=True)
+        
+        print(f"  Total transforms to export: {len(transforms_to_export)}")
+        
+        # Store for later use
+        self.transforms_to_export = transforms_to_export
+        
+        # Find root nodes
+        root_nodes = []
+        for transform in transforms_to_export:
+            parent = cmds.listRelatives(transform, parent=True, fullPath=True)
+            if not parent or parent[0] not in transforms_to_export:
                 root_nodes.append(transform)
         
-        # Detect joints for skinning
-        self.all_joints = cmds.ls(type='joint')
-        if self.all_joints:
-            print(f"  Found {len(self.all_joints)} joints")
+        print(f"  Root nodes: {len(root_nodes)}")
+        for root in root_nodes:
+            print(f"    - {root.split('|')[-1]}")
+            
+        # Store pivots for all transforms
+        for transform in transforms_to_export:
+            pivot = cmds.xform(transform, query=True, rotatePivot=True, worldSpace=False)
+            self.pivot_map[transform] = pivot
         
         return root_nodes
+    
+    def process_parent_transforms(self, mesh_shapes):
+        """Create nodes for parent transforms (empty nodes without meshes)"""
+        print("\nProcessing parent transforms...")
+        
+        # Collect all parent transforms
+        for transform in self.transforms_to_export:
+            # Skip if already processed (mesh nodes)
+            if transform in self.node_index_map:
+                continue
+            
+            # This is an empty transform (no mesh)
+            short_name = transform.split('|')[-1]
+            print(f"  {short_name} (empty transform)")
+            
+            # Get LOCAL transform
+            local_trans, local_quat, local_scale = self.get_transform_with_pivot(transform)
+            
+            # Get pivot and parent pivot for compensation
+            self_pivot = self.pivot_map.get(transform, [0, 0, 0])
+            parent = cmds.listRelatives(transform, parent=True, fullPath=True)
+            parent_pivot = [0, 0, 0]
+            if parent and parent[0] in self.pivot_map:
+                parent_pivot = self.pivot_map[parent[0]]
+            
+            # Compensate for parent pivot and move node to self pivot
+            # glTF_trans = local_trans - parent_pivot + self_pivot
+            final_trans = [
+                local_trans[0] - parent_pivot[0] + self_pivot[0],
+                local_trans[1] - parent_pivot[1] + self_pivot[1],
+                local_trans[2] - parent_pivot[2] + self_pivot[2]
+            ]
+            
+            # Create node
+            node_data = {"name": short_name}
+            
+            # Add non-identity transforms
+            if not all(abs(t) < 0.0001 for t in final_trans):
+                node_data["translation"] = final_trans
+            
+            if not all(abs(r - 1.0 if i == 3 else 0.0) < 0.0001 for i, r in enumerate(local_quat)):
+                node_data["rotation"] = local_quat
+            
+            if not all(abs(s - 1.0) < 0.0001 for s in local_scale):
+                node_data["scale"] = local_scale
+            
+            node_index = len(self.gltf_data["nodes"])
+            self.gltf_data["nodes"].append(node_data)
+            self.node_index_map[transform] = node_index
+    
+    def build_gltf_hierarchy(self):
+        """Build parent-child relationships in GLTF nodes"""
+        print("\nBuilding GLTF hierarchy...")
+        
+        for transform in self.transforms_to_export:
+            if transform not in self.node_index_map:
+                continue
+            
+            node_idx = self.node_index_map[transform]
+            
+            # Get Maya children
+            children = cmds.listRelatives(transform, children=True, type='transform', fullPath=True)
+            if children:
+                child_indices = []
+                for child in children:
+                    if child in self.node_index_map:
+                        child_indices.append(self.node_index_map[child])
+                
+                if child_indices:
+                    self.gltf_data["nodes"][node_idx]["children"] = child_indices
+                    short_name = transform.split('|')[-1]
+                    print(f"  {short_name} → {len(child_indices)} child(ren)")
     
     def process_mesh(self, mesh_shape):
         """Process mesh with animation support"""
@@ -265,70 +363,23 @@ class GLTFExporter:
         # Check for skinning
         skin_cluster = self.get_skin_cluster(mesh_shape)
         
-        # Get world matrix and mesh bounding box
-        world_matrix_list = cmds.xform(transform, query=True, matrix=True, worldSpace=True)
-        bbox = cmds.xform(transform, query=True, boundingBox=True, worldSpace=True)
-        mesh_center_world = [
-            (bbox[0] + bbox[3]) / 2,
-            (bbox[1] + bbox[4]) / 2,
-            (bbox[2] + bbox[5]) / 2
-        ]
+        # Get pivot and local translation
+        rotate_pivot = cmds.xform(transform, query=True, rotatePivot=True, worldSpace=False)
+        local_trans = cmds.xform(transform, query=True, translation=True, worldSpace=False)
         
-        print(f"  ℹ Mesh center (world): [{mesh_center_world[0]:.4f}, {mesh_center_world[1]:.4f}, {mesh_center_world[2]:.4f}]")
+        # Check if transforms are frozen (local translation is zero)
+        transforms_frozen = all(abs(t) < 0.0001 for t in local_trans)
+        pivot_at_origin = all(abs(p) < 0.0001 for p in rotate_pivot)
         
-        # Check if animated
-        will_animate = False
-        if self.export_animation:
-            will_animate = self.is_animated(transform)
+        # In Maya, vertices are stored relative to the pivot point.
+        # For GLTF, we want vertices relative to the object origin.
+        # So we offset vertices by -pivot to make them relative to origin,
+        # and add +pivot to translation to compensate.
+        should_offset_vertices = not pivot_at_origin
         
-        # Determine node position
-        if will_animate:
-            # ANIMATED: Node at mesh center (animation will move it)
-            node_world_pos = mesh_center_world
-            print(f"  ℹ Animated - vertices will be un-rotated to identity")
-            
-            # For animation: we need to un-rotate vertices to identity orientation
-            # So animation can apply world-space rotation from identity
-            # Get initial world rotation and invert it
-            import maya.api.OpenMaya as om2
-            matrix_obj = om2.MMatrix([
-                world_matrix_list[0], world_matrix_list[1], world_matrix_list[2], world_matrix_list[3],
-                world_matrix_list[4], world_matrix_list[5], world_matrix_list[6], world_matrix_list[7],
-                world_matrix_list[8], world_matrix_list[9], world_matrix_list[10], world_matrix_list[11],
-                world_matrix_list[12], world_matrix_list[13], world_matrix_list[14], world_matrix_list[15]
-            ])
-            
-            transform_matrix = om2.MTransformationMatrix(matrix_obj)
-            
-            # Get rotation and invert it
-            rotation_quat = transform_matrix.rotation(asQuaternion=True)
-            inverse_quat = rotation_quat.inverse()
-            
-            # Create inverse rotation matrix (rotation only, no translation)
-            inverse_rotation_matrix = om2.MTransformationMatrix()
-            inverse_rotation_matrix.setRotation(inverse_quat)
-            inverse_matrix = inverse_rotation_matrix.asMatrix()
-            
-            # We'll apply this inverse rotation to vertices
-            unrotate_vertices = True
-            
-        else:
-            # STATIC: Node at mesh center
-            node_world_pos = mesh_center_world
-            print(f"  ℹ Static - node at mesh center")
-            unrotate_vertices = False
-        
-        # Convert matrix to MMatrix for vertex transformation
-        matrix = om.MMatrix()
-        om.MScriptUtil.createMatrixFromList(world_matrix_list, matrix)
-        
-        # Store for get_transform_with_pivot
-        if not hasattr(self, '_mesh_node_positions'):
-            self._mesh_node_positions = {}
-        self._mesh_node_positions[transform] = {
-            'position': node_world_pos,
-            'animated': will_animate
-        }
+        if should_offset_vertices:
+            print(f"  ℹ Pivot point: [{rotate_pivot[0]:.4f}, {rotate_pivot[1]:.4f}, {rotate_pivot[2]:.4f}]")
+            print(f"  ℹ Offsetting vertices by -pivot for GLTF compatibility")
         
         # Build vertex data
         vertices = []
@@ -382,28 +433,16 @@ class GLTFExporter:
                         
                         point = points[vert_index]
                         
-                        # Transform vertex to world space
-                        point_world = om.MPoint(point.x, point.y, point.z) * matrix
-                        
-                        # For animated meshes: un-rotate to identity orientation
-                        if unrotate_vertices:
-                            # Apply inverse rotation (as om2.MPoint for the transformation)
-                            import maya.api.OpenMaya as om2
-                            point_om2 = om2.MPoint(point_world.x - node_world_pos[0], 
-                                                   point_world.y - node_world_pos[1], 
-                                                   point_world.z - node_world_pos[2])
-                            point_unrotated = point_om2 * inverse_matrix
-                            
-                            vertex_x = point_unrotated.x
-                            vertex_y = point_unrotated.y
-                            vertex_z = point_unrotated.z
+                        # Offset vertices by -pivot to make them relative to object origin
+                        if should_offset_vertices:
+                            vertices.extend([
+                                point.x - rotate_pivot[0],
+                                point.y - rotate_pivot[1],
+                                point.z - rotate_pivot[2]
+                            ])
                         else:
-                            # Static: just offset by node position
-                            vertex_x = point_world.x - node_world_pos[0]
-                            vertex_y = point_world.y - node_world_pos[1]
-                            vertex_z = point_world.z - node_world_pos[2]
+                            vertices.extend([point.x, point.y, point.z])
                         
-                        vertices.extend([vertex_x, vertex_y, vertex_z])
                         vertex_normals.extend([normal.x, normal.y, normal.z])
                         
                         if uv_index >= 0 and uv_index < len(u_array):
@@ -598,23 +637,38 @@ class GLTFExporter:
             "mesh": mesh_index
         }
         
-        # Get transform with pivot baked in
+        # Get LOCAL transform (relative to parent)
         translation, rotation, scale = self.get_transform_with_pivot(transform)
         
-        # Check if this will be animated
-        is_animated = False
-        if hasattr(self, '_mesh_node_positions') and transform in self._mesh_node_positions:
-            is_animated = self._mesh_node_positions[transform]['animated']
+        # Get pivot and parent pivot for compensation
+        self_pivot = self.pivot_map.get(transform, [0, 0, 0])
+        parent = cmds.listRelatives(transform, parent=True, fullPath=True)
+        parent_pivot = [0, 0, 0]
+        if parent and parent[0] in self.pivot_map:
+            parent_pivot = self.pivot_map[parent[0]]
+            
+        # Compensate for parent pivot and move node to self pivot
+        # glTF_trans = local_trans - parent_pivot + self_pivot
+        final_translation = [
+            translation[0] - parent_pivot[0] + self_pivot[0],
+            translation[1] - parent_pivot[1] + self_pivot[1],
+            translation[2] - parent_pivot[2] + self_pivot[2]
+        ]
         
         # Debug output
-        print(f"  ℹ Node position: [{translation[0]:.6f}, {translation[1]:.6f}, {translation[2]:.6f}]")
+        print(f"  ℹ Local transform: T[{final_translation[0]:.3f}, {final_translation[1]:.3f}, {final_translation[2]:.3f}] " +
+              f"R[{rotation[0]:.3f}, {rotation[1]:.3f}, {rotation[2]:.3f}, {rotation[3]:.3f}]")
         
-        # Set translation (always needed)
-        if not all(abs(t) < 0.0001 for t in translation):
-            node_data["translation"] = translation
+        # Add non-identity transforms
+        if not all(abs(t) < 0.0001 for t in final_translation):
+            node_data["translation"] = final_translation
         
-        # NO static rotation - vertices are in world space with rotation baked in
-        # For animated nodes, rotation starts at identity and animation changes it
+        # Export local rotation for mesh nodes
+        if not all(abs(r - 1.0 if i == 3 else 0.0) < 0.0001 for i, r in enumerate(rotation)):
+            node_data["rotation"] = rotation
+        
+        if not all(abs(s - 1.0) < 0.0001 for s in scale):
+            node_data["scale"] = scale
         
         # Add skin reference if skinned
         if skin_cluster:
@@ -867,46 +921,41 @@ class GLTFExporter:
             
             print(f"\n  Baking {transform.split('|')[-1]}...")
             
-            # For animation: Sample world-space position AND rotation at every frame
-            # This captures the actual motion as it appears in Maya
+            # Sample LOCAL transforms at every frame (relative to parent)
             translations = []
             rotations = []
             scales = []
             
+            # Get pivot and parent pivot for compensation
+            self_pivot = self.pivot_map.get(transform, [0, 0, 0])
+            parent = cmds.listRelatives(transform, parent=True, fullPath=True)
+            parent_pivot = [0, 0, 0]
+            if parent and parent[0] in self.pivot_map:
+                parent_pivot = self.pivot_map[parent[0]]
+            
             for frame in frames:
                 cmds.currentTime(frame)
                 
-                # Get mesh bounding box at this frame (where it actually is)
-                bbox = cmds.xform(transform, query=True, boundingBox=True, worldSpace=True)
-                mesh_center = [
-                    (bbox[0] + bbox[3]) / 2,
-                    (bbox[1] + bbox[4]) / 2,
-                    (bbox[2] + bbox[5]) / 2
+                # Get LOCAL translation, rotation, scale
+                local_trans = cmds.xform(transform, query=True, translation=True, worldSpace=False)
+                
+                # Compensate for parent pivot and move node to self pivot
+                final_trans = [
+                    local_trans[0] - parent_pivot[0] + self_pivot[0],
+                    local_trans[1] - parent_pivot[1] + self_pivot[1],
+                    local_trans[2] - parent_pivot[2] + self_pivot[2]
                 ]
-                translations.extend(mesh_center)
+                translations.extend(final_trans)
                 
-                # Get world-space rotation at this frame
-                world_matrix = cmds.xform(transform, query=True, matrix=True, worldSpace=True)
+                # Get LOCAL rotation as quaternion
+                local_quat = self.get_transform_quaternion(transform)
+                rotations.extend(local_quat)
                 
-                import maya.api.OpenMaya as om2
-                matrix_obj = om2.MMatrix([
-                    world_matrix[0], world_matrix[1], world_matrix[2], world_matrix[3],
-                    world_matrix[4], world_matrix[5], world_matrix[6], world_matrix[7],
-                    world_matrix[8], world_matrix[9], world_matrix[10], world_matrix[11],
-                    world_matrix[12], world_matrix[13], world_matrix[14], world_matrix[15]
-                ])
-                
-                transform_matrix = om2.MTransformationMatrix(matrix_obj)
-                rotation_quat = transform_matrix.rotation(asQuaternion=True)
-                
-                quat = [rotation_quat.x, rotation_quat.y, rotation_quat.z, rotation_quat.w]
-                rotations.extend(quat)
-                
-                # Scale (usually constant)
-                scl = cmds.xform(transform, query=True, scale=True, relative=True)
-                scales.extend(scl)
+                # Get LOCAL scale
+                local_scale = cmds.xform(transform, query=True, scale=True, relative=True)
+                scales.extend(local_scale)
             
-            print(f"    Sampled {len(frames)} frames")
+            print(f"    Sampled {len(frames)} frames (local transforms)")
             
             # Pack and add translation
             if len(translations) > 0:
@@ -1027,21 +1076,14 @@ class GLTFExporter:
             print("  No animation channels exported")
     
     def get_transform_with_pivot(self, transform):
-        """Get translation/rotation/scale using pre-calculated world positions"""
-        # Use stored position from process_mesh
-        if hasattr(self, '_mesh_node_positions') and transform in self._mesh_node_positions:
-            node_info = self._mesh_node_positions[transform]
-            final_translation = node_info['position']
-        else:
-            # Fallback: calculate on the fly
-            world_matrix = cmds.xform(transform, query=True, matrix=True, worldSpace=True)
-            final_translation = [world_matrix[12], world_matrix[13], world_matrix[14]]
+        """Get LOCAL translation/rotation/scale for hierarchical export"""
+        # Get local-space transforms (relative to parent)
+        # These already account for pivot points correctly
+        local_trans = cmds.xform(transform, query=True, translation=True, worldSpace=False)
+        local_quat = self.get_transform_quaternion(transform)
+        local_scale = cmds.xform(transform, query=True, scale=True, relative=True)
         
-        # Get rotation and scale (not used for static, used for initial state of animated)
-        rotation = cmds.xform(transform, query=True, rotation=True, worldSpace=False)
-        scale = cmds.xform(transform, query=True, scale=True, relative=True)
-        
-        return final_translation, rotation, scale
+        return local_trans, local_quat, local_scale
     
     def is_animated(self, transform):
         """Check if transform is animated"""
@@ -1071,27 +1113,149 @@ class GLTFExporter:
         }
         return fps_map.get(time_unit, 24)
     
-    def euler_to_quaternion(self, x, y, z):
-        """Convert Euler angles (degrees) to quaternion [x, y, z, w]"""
-        # Convert to radians
-        x = math.radians(x)
-        y = math.radians(y)
-        z = math.radians(z)
+    def get_transform_quaternion(self, transform):
+        """Get the local quaternion rotation of a transform using Maya API"""
+        try:
+            # Get the MObject for the transform
+            sel_list = om.MSelectionList()
+            sel_list.add(transform)
+            mobj = om.MObject()
+            sel_list.getDependNode(0, mobj)
+            
+            # Create MFnTransform
+            fn_transform = om.MFnTransform(mobj)
+            
+            # Get the local rotation as quaternion
+            quat = om.MQuaternion()
+            fn_transform.getRotation(quat, om.MSpace.kTransform)
+            
+            # Return as [x, y, z, w] list, negated to match GLTF rotation direction
+            return [-quat.x, -quat.y, -quat.z, quat.w]
+            
+        except:
+            # Fallback: convert from Euler angles
+            local_rot = cmds.xform(transform, query=True, rotation=True, worldSpace=False)
+            return self.euler_to_quaternion(local_rot[0], local_rot[1], local_rot[2])
+    
+    def matrix_inverse(self, matrix):
+        """Compute inverse of 4x4 matrix (simplified for affine transforms)"""
+        # For affine transforms, we can use a simplified inverse
+        # This assumes the matrix is affine (last row is [0,0,0,1])
+        m = matrix
         
-        # Calculate quaternion
-        cx = math.cos(x * 0.5)
-        sx = math.sin(x * 0.5)
-        cy = math.cos(y * 0.5)
-        sy = math.sin(y * 0.5)
-        cz = math.cos(z * 0.5)
-        sz = math.sin(z * 0.5)
+        # Extract rotation/scale part (3x3)
+        rot_scale = [
+            [m[0], m[1], m[2]],
+            [m[4], m[5], m[6]],
+            [m[8], m[9], m[10]]
+        ]
         
-        qw = cx * cy * cz + sx * sy * sz
-        qx = sx * cy * cz - cx * sy * sz
-        qy = cx * sy * cz + sx * cy * sz
-        qz = cx * cy * sz - sx * sy * cz
+        # Extract translation
+        trans = [m[3], m[7], m[11]]
         
-        return [qx, qy, qz, qw]
+        # Compute determinant of 3x3 matrix
+        det = (rot_scale[0][0] * (rot_scale[1][1] * rot_scale[2][2] - rot_scale[1][2] * rot_scale[2][1]) -
+               rot_scale[0][1] * (rot_scale[1][0] * rot_scale[2][2] - rot_scale[1][2] * rot_scale[2][0]) +
+               rot_scale[0][2] * (rot_scale[1][0] * rot_scale[2][1] - rot_scale[1][1] * rot_scale[2][0]))
+        
+        if abs(det) < 1e-6:
+            # Singular matrix, return identity
+            return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]
+        
+        # Compute inverse of 3x3
+        inv_det = 1.0 / det
+        inv_rot_scale = [
+            [(rot_scale[1][1] * rot_scale[2][2] - rot_scale[1][2] * rot_scale[2][1]) * inv_det,
+             (rot_scale[0][2] * rot_scale[2][1] - rot_scale[0][1] * rot_scale[2][2]) * inv_det,
+             (rot_scale[0][1] * rot_scale[1][2] - rot_scale[0][2] * rot_scale[1][1]) * inv_det],
+            [(rot_scale[1][2] * rot_scale[2][0] - rot_scale[1][0] * rot_scale[2][2]) * inv_det,
+             (rot_scale[0][0] * rot_scale[2][2] - rot_scale[0][2] * rot_scale[2][0]) * inv_det,
+             (rot_scale[0][2] * rot_scale[1][0] - rot_scale[0][0] * rot_scale[1][2]) * inv_det],
+            [(rot_scale[1][0] * rot_scale[2][1] - rot_scale[1][1] * rot_scale[2][0]) * inv_det,
+             (rot_scale[0][1] * rot_scale[2][0] - rot_scale[0][0] * rot_scale[2][1]) * inv_det,
+             (rot_scale[0][0] * rot_scale[1][1] - rot_scale[0][1] * rot_scale[1][0]) * inv_det]
+        ]
+        
+        # Compute inverse translation: -inv_rot_scale * trans
+        inv_trans = [
+            -(inv_rot_scale[0][0] * trans[0] + inv_rot_scale[0][1] * trans[1] + inv_rot_scale[0][2] * trans[2]),
+            -(inv_rot_scale[1][0] * trans[0] + inv_rot_scale[1][1] * trans[1] + inv_rot_scale[1][2] * trans[2]),
+            -(inv_rot_scale[2][0] * trans[0] + inv_rot_scale[2][1] * trans[1] + inv_rot_scale[2][2] * trans[2])
+        ]
+        
+        # Build inverse matrix
+        return [
+            inv_rot_scale[0][0], inv_rot_scale[1][0], inv_rot_scale[2][0], inv_trans[0],
+            inv_rot_scale[0][1], inv_rot_scale[1][1], inv_rot_scale[2][1], inv_trans[1],
+            inv_rot_scale[0][2], inv_rot_scale[1][2], inv_rot_scale[2][2], inv_trans[2],
+            0, 0, 0, 1
+        ]
+    
+    def matrix_multiply(self, a, b):
+        """Multiply two 4x4 matrices"""
+        return [
+            a[0]*b[0] + a[1]*b[4] + a[2]*b[8] + a[3]*b[12],
+            a[0]*b[1] + a[1]*b[5] + a[2]*b[9] + a[3]*b[13],
+            a[0]*b[2] + a[1]*b[6] + a[2]*b[10] + a[3]*b[14],
+            a[0]*b[3] + a[1]*b[7] + a[2]*b[11] + a[3]*b[15],
+            
+            a[4]*b[0] + a[5]*b[4] + a[6]*b[8] + a[7]*b[12],
+            a[4]*b[1] + a[5]*b[5] + a[6]*b[9] + a[7]*b[13],
+            a[4]*b[2] + a[5]*b[6] + a[6]*b[10] + a[7]*b[14],
+            a[4]*b[3] + a[5]*b[7] + a[6]*b[11] + a[7]*b[15],
+            
+            a[8]*b[0] + a[9]*b[4] + a[10]*b[8] + a[11]*b[12],
+            a[8]*b[1] + a[9]*b[5] + a[10]*b[9] + a[11]*b[13],
+            a[8]*b[2] + a[9]*b[6] + a[10]*b[10] + a[11]*b[14],
+            a[8]*b[3] + a[9]*b[7] + a[10]*b[11] + a[11]*b[15],
+            
+            a[12]*b[0] + a[13]*b[4] + a[14]*b[8] + a[15]*b[12],
+            a[12]*b[1] + a[13]*b[5] + a[14]*b[9] + a[15]*b[13],
+            a[12]*b[2] + a[13]*b[6] + a[14]*b[10] + a[15]*b[14],
+            a[12]*b[3] + a[13]*b[7] + a[14]*b[11] + a[15]*b[15]
+        ]
+    
+    def decompose_matrix(self, matrix):
+        """Decompose 4x4 transformation matrix into translation, rotation (Euler), scale"""
+        # Extract translation
+        translation = [matrix[3], matrix[7], matrix[11]]
+        
+        # Extract scale and rotation
+        # This is a simplified decomposition - assumes no shear
+        sx = math.sqrt(matrix[0]**2 + matrix[1]**2 + matrix[2]**2)
+        sy = math.sqrt(matrix[4]**2 + matrix[5]**2 + matrix[6]**2)
+        sz = math.sqrt(matrix[8]**2 + matrix[9]**2 + matrix[10]**2)
+        
+        scale = [sx, sy, sz]
+        
+        # Extract rotation matrix (divide by scale)
+        if sx > 1e-6:
+            rot_matrix = [
+                matrix[0]/sx, matrix[1]/sx, matrix[2]/sx,
+                matrix[4]/sy, matrix[5]/sy, matrix[6]/sy,
+                matrix[8]/sz, matrix[9]/sz, matrix[10]/sz
+            ]
+        else:
+            # Degenerate case
+            rot_matrix = [1,0,0, 0,1,0, 0,0,1]
+        
+        # Convert rotation matrix to Euler angles (XYZ order)
+        # This is a simplified extraction - may not handle all cases perfectly
+        sy_rot = math.sqrt(rot_matrix[0]**2 + rot_matrix[3]**2)
+        
+        if sy_rot > 1e-6:
+            x = math.atan2(rot_matrix[7], rot_matrix[8])
+            y = math.atan2(-rot_matrix[6], sy_rot)
+            z = math.atan2(rot_matrix[3], rot_matrix[0])
+        else:
+            x = math.atan2(-rot_matrix[5], rot_matrix[4])
+            y = math.atan2(-rot_matrix[6], sy_rot)
+            z = 0
+        
+        # Convert to degrees
+        rotation = [math.degrees(x), math.degrees(y), math.degrees(z)]
+        
+        return translation, rotation, scale
     
     def process_material(self, mesh_shape):
         """Process materials"""
@@ -1702,7 +1866,6 @@ class GLTFExporterUI:
         
         cmds.showWindow(window)
         
-        print("\n" + "="*60)
         print(f"Maya GLTF Exporter v{VERSION}")
         print("="*60)
         print("Features:")
@@ -1710,7 +1873,7 @@ class GLTFExporterUI:
         print("  • Transform & skeletal animation")
         print("  • Frame baking with timeline controls")
         print("  • Texture embedding (GLB)")
-        print("  • Correct pivot handling")
+        print("  • Fixed axis and pivot point handling")
         print("="*60 + "\n")
     
     def toggle_animation_options(self, value):
