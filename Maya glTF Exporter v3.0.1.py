@@ -1,23 +1,25 @@
 """
-Maya GLTF/GLB Exporter
-Professional GLTF 2.0 exporter for Autodesk Maya 2026+
+Maya GLTF/GLB Exporter v3.0.1
+GLTF 2.0 exporter for Autodesk Maya 2026+
 
 Features:
 - openPBRSurface and standardSurface material support
 - Full animation export with frame baking
 - Skeletal animation support (skinClusters)
 - Texture embedding in GLB format
-- Correct pivot point handling
+- World-space baking for any hierarchy
 - Timeline and custom frame range control
 
 Author: Created with assistance from Claude (Anthropic)
 License: MIT
-Version: 1.0.0
+Version: 3.0.1
 Date: January 2026
 
 USAGE:
 1. Copy this entire script
 2. Paste into Maya Script Editor (Python tab)
+3. Execute to open the exporter UI
+"""
 3. Execute to open the exporter UI
 """
 
